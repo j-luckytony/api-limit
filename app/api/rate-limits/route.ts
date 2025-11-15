@@ -33,6 +33,27 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Check for existing rate limit of the same type and API path
+    const existingRateLimit = await prisma.rateLimit.findFirst({
+      where: {
+        tenantId: validatedData.tenantId,
+        type: validatedData.type as RateLimitType,
+        apiPath: validatedData.apiPath || null,
+        isActive: true,
+      },
+    });
+
+    if (existingRateLimit) {
+      const duplicateType = validatedData.type === 'API' 
+        ? `${validatedData.type} (${validatedData.apiPath})`
+        : validatedData.type;
+      
+      return NextResponse.json(
+        { error: `A rate limit of type "${duplicateType}" already exists for this tenant. Please update the existing one or delete it first.` },
+        { status: 409 }
+      );
+    }
+
     const rateLimit = await prisma.rateLimit.create({
       data: {
         tenantId: validatedData.tenantId,

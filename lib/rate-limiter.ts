@@ -165,10 +165,22 @@ export async function applyRateLimit(
     };
   }
 
-  // Check all applicable rate limits
+  // Group configs by type and find the most restrictive for each type
+  const configsByType = new Map<string, RateLimitConfig>();
+  
+  for (const config of configs) {
+    const typeKey = config.type + (config.apiPath || '');
+    const existing = configsByType.get(typeKey);
+    
+    if (!existing || config.maxRequests < existing.maxRequests) {
+      configsByType.set(typeKey, config);
+    }
+  }
+
+  // Check all applicable rate limits using the most restrictive configs
   const results: RateLimitResult[] = [];
 
-  for (const config of configs) {
+  for (const config of configsByType.values()) {
     let identifier: string;
     let shouldCheck = false;
 

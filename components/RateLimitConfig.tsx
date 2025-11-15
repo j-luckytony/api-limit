@@ -24,6 +24,12 @@ export default function RateLimitConfig({ tenantId }: { tenantId: string }) {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState({
+    maxRequests: 100,
+    windowValue: 1,
+    windowUnit: 'minutes' as 'seconds' | 'minutes' | 'hours' | 'days',
+    apiPath: '',
+  });
 
   // Form state
   const [formData, setFormData] = useState({
@@ -79,8 +85,11 @@ export default function RateLimitConfig({ tenantId }: { tenantId: string }) {
     return `${value} ${unit}`;
   };
 
+  const [submitError, setSubmitError] = useState('');
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSubmitError('');
 
     const windowMs = convertToMs(formData.windowValue, formData.windowUnit);
 
@@ -97,13 +106,18 @@ export default function RateLimitConfig({ tenantId }: { tenantId: string }) {
         }),
       });
 
+      const data = await response.json();
+
       if (response.ok) {
         setShowForm(false);
         resetForm();
         fetchTenant();
+      } else {
+        setSubmitError(data.error || 'Failed to create rate limit');
       }
     } catch (error) {
       console.error('Error creating rate limit:', error);
+      setSubmitError('Network error. Please try again.');
     }
   };
 
@@ -139,6 +153,55 @@ export default function RateLimitConfig({ tenantId }: { tenantId: string }) {
       windowUnit: 'minutes',
       apiPath: '',
     });
+    setSubmitError('');
+  };
+
+  const startEdit = (limit: RateLimit) => {
+    const { value, unit } = convertFromMs(limit.windowMs);
+    setEditForm({
+      maxRequests: limit.maxRequests,
+      windowValue: value,
+      windowUnit: unit as 'seconds' | 'minutes' | 'hours' | 'days',
+      apiPath: limit.apiPath || '',
+    });
+    setEditingId(limit.id);
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditForm({
+      maxRequests: 100,
+      windowValue: 1,
+      windowUnit: 'minutes',
+      apiPath: '',
+    });
+  };
+
+  const saveEdit = async (limitId: string, limitType: RateLimit['type']) => {
+    try {
+      const windowMs = convertToMs(editForm.windowValue, editForm.windowUnit);
+      
+      const response = await fetch(`/api/rate-limits/${limitId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          maxRequests: editForm.maxRequests,
+          windowMs,
+          apiPath: limitType === 'API' ? editForm.apiPath : undefined,
+        }),
+      });
+
+      if (response.ok) {
+        setEditingId(null);
+        fetchTenant();
+      } else {
+        const data = await response.json();
+        alert(data.error || 'Failed to update rate limit');
+      }
+    } catch (error) {
+      console.error('Error updating rate limit:', error);
+      alert('Network error. Please try again.');
+    }
   };
 
   if (loading) {
@@ -182,6 +245,11 @@ export default function RateLimitConfig({ tenantId }: { tenantId: string }) {
         {/* Form */}
         {showForm && (
           <form onSubmit={handleSubmit} className="mb-6 p-4 bg-slate-50 dark:bg-slate-700 rounded-lg space-y-4">
+            {submitError && (
+              <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 px-4 py-3 rounded">
+                {submitError}
+              </div>
+            )}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
@@ -269,6 +337,7 @@ export default function RateLimitConfig({ tenantId }: { tenantId: string }) {
           </form>
         )}
 
+
         {/* Rate Limits Table */}
         {rateLimits.length === 0 ? (
           <p className="text-center text-slate-600 dark:text-slate-400 py-8">
@@ -295,34 +364,106 @@ export default function RateLimitConfig({ tenantId }: { tenantId: string }) {
                         {limit.type}
                       </span>
                     </td>
-                    <td className="py-3 px-4 text-slate-900 dark:text-white">
-                      {limit.maxRequests} requests
+                    <td className="py-3 px-4">
+                      {editingId === limit.id ? (
+                        <input
+                          type="number"
+                          value={editForm.maxRequests}
+                          onChange={(e) => setEditForm({ ...editForm, maxRequests: parseInt(e.target.value) || 0 })}
+                          className="w-20 px-2 py-1 text-sm border border-slate-300 dark:border-slate-600 rounded focus:ring-2 focus:ring-blue-500 dark:bg-slate-700 dark:text-white"
+                          min="1"
+                        />
+                      ) : (
+                        <span className="text-slate-900 dark:text-white">{limit.maxRequests} requests</span>
+                      )}
                     </td>
-                    <td className="py-3 px-4 text-slate-900 dark:text-white">
-                      {formatWindow(limit.windowMs)}
+                    <td className="py-3 px-4">
+                      {editingId === limit.id ? (
+                        <div className="flex gap-1">
+                          <input
+                            type="number"
+                            value={editForm.windowValue}
+                            onChange={(e) => setEditForm({ ...editForm, windowValue: parseInt(e.target.value) || 1 })}
+                            className="w-16 px-2 py-1 text-sm border border-slate-300 dark:border-slate-600 rounded focus:ring-2 focus:ring-blue-500 dark:bg-slate-700 dark:text-white"
+                            min="1"
+                          />
+                          <select
+                            value={editForm.windowUnit}
+                            onChange={(e) => setEditForm({ ...editForm, windowUnit: e.target.value as any })}
+                            className="px-2 py-1 text-sm border border-slate-300 dark:border-slate-600 rounded focus:ring-2 focus:ring-blue-500 dark:bg-slate-700 dark:text-white"
+                          >
+                            <option value="seconds">sec</option>
+                            <option value="minutes">min</option>
+                            <option value="hours">hr</option>
+                            <option value="days">day</option>
+                          </select>
+                        </div>
+                      ) : (
+                        <span className="text-slate-900 dark:text-white">{formatWindow(limit.windowMs)}</span>
+                      )}
                     </td>
-                    <td className="py-3 px-4 text-slate-600 dark:text-slate-400">
-                      {limit.apiPath || '-'}
+                    <td className="py-3 px-4">
+                      {editingId === limit.id && limit.type === 'API' ? (
+                        <input
+                          type="text"
+                          value={editForm.apiPath}
+                          onChange={(e) => setEditForm({ ...editForm, apiPath: e.target.value })}
+                          className="w-full px-2 py-1 text-sm border border-slate-300 dark:border-slate-600 rounded focus:ring-2 focus:ring-blue-500 dark:bg-slate-700 dark:text-white"
+                          placeholder="/api/path"
+                        />
+                      ) : (
+                        <span className="text-slate-600 dark:text-slate-400">{limit.apiPath || '-'}</span>
+                      )}
                     </td>
                     <td className="py-3 px-4">
                       <button
                         onClick={() => toggleActive(limit.id, limit.isActive)}
+                        disabled={editingId === limit.id}
                         className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
                           limit.isActive
                             ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
                             : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300'
-                        }`}
+                        } ${editingId === limit.id ? 'opacity-50 cursor-not-allowed' : ''}`}
                       >
                         {limit.isActive ? 'Active' : 'Inactive'}
                       </button>
                     </td>
                     <td className="py-3 px-4 text-right">
-                      <button
-                        onClick={() => deleteRateLimit(limit.id)}
-                        className="text-red-500 hover:text-red-700 transition-colors"
-                      >
-                        <Trash2 size={18} />
-                      </button>
+                      {editingId === limit.id ? (
+                        <div className="flex gap-2 justify-end">
+                          <button
+                            onClick={() => saveEdit(limit.id, limit.type)}
+                            className="text-green-600 hover:text-green-700 transition-colors"
+                            title="Save changes"
+                          >
+                            <Save size={18} />
+                          </button>
+                          <button
+                            onClick={cancelEdit}
+                            className="text-gray-600 hover:text-gray-700 transition-colors"
+                            title="Cancel editing"
+                          >
+                            <X size={18} />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex gap-2 justify-end">
+                          <button
+                            onClick={() => startEdit(limit)}
+                            className="text-blue-600 hover:text-blue-700 transition-colors"
+                            title="Edit rate limit"
+                          >
+                            <Edit2 size={18} />
+                          </button>
+                          <button
+                            onClick={() => deleteRateLimit(limit.id)}
+                            className="text-red-500 hover:text-red-700 transition-colors"
+                            title="Delete rate limit"
+                          >
+                            <Trash2 size={18} />
+                          </button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 ))}
