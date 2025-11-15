@@ -328,3 +328,8 @@ MIT
 ## Support
 
 For issues and questions, please open an issue on the repository.
+
+
+## Design
+![alt text](image.png)
+![alt text](image-1.png)
